@@ -1,67 +1,101 @@
-# Streamlit App
+# Smart Recommendation Assistant
 
-Streamlit App Boilerplate that contains everything you need to get running.
+A chatbot that recommends items from a real catalog. You pick a dataset, look at a sample of its items, then describe what you want in plain language. The app finds the closest matches by meaning, not by keywords, and tells you how confident it is in each one.
 
-Built with ❤️ by [gerardrbentley](https://github.com/gerardrbentley)
+**Live demo:** <https://llmrecsyschatbot.streamlit.app>
 
-## What's this?
+## How it works
 
-- `README.md`: This Document! To help you find your way around
-- `streamlit_app.py`: The main app that gets run by [`streamlit`](https://docs.streamlit.io/)
-- `requirements.txt`: Pins the version of packages needed
-- `LICENSE`: Follows Streamlit's use of Apache 2.0 Open Source License
-- `.gitignore`: Tells git to avoid comitting / scanning certain local-specific files
-- `.streamlit/config.toml`: Customizes the behaviour of streamlit without specifying command line arguments (`streamlit config show`)
-- `Makefile`: Provides useful commands for working on the project such as `run`, `lint`, `test`, and `test-e2e`
-- `requirements.dev.txt`: Provides packages useful for development but not necessarily production deployment. Also includes all of `requirements.txt` via `-r`
-- `pyproject.toml`: Provides a main configuration point for Python dev tools
-- `.flake8`: Because `flake8` doesn't play nicely with `pyproject.toml` out of the box
-- `.pre-commit-config.yaml`: Provides safeguards for what you commit and push to your repo
-- `tests/`: Folder for tests to be picked up by `pytest`
+1. **Choose a dataset** in the sidebar (Amazon Beauty, Amazon Video Games or Yelp).
+2. **Preview a sample.** A grid of cards shows real items with their picture, title, rating and description. "Show another sample" draws a new random set.
+3. **Describe what you want**, for example "something for dry skin" or "a quiet place for a date night".
+4. **Claude rewrites the request** as a short English search phrase. It does not pick items itself, so it cannot invent products that are not in the data.
+5. **Semantic search** compares that phrase with every item in the chosen dataset using sentence embeddings and cosine similarity.
+6. **Results come back as cards** with the description and a confidence label (strong, moderate or weak match) based on the similarity score.
 
-## Local Setup
-
-Assumes working python installation and some command line knowledge ([install python with conda guide](https://tech.gerardbentley.com/python/beginner/2022/01/29/install-python.html)).
-
-```sh
-# External users: download Files
-git clone git@github.com:gerardrbentley/streamlit_app.git
-
-# Go to correct directory
-cd streamlit_app
-
-# Run the streamlit app (will install dependencies in a virtualenvironment in the folder venv)
-make run
+```
+user message -> Claude (search phrase) -> embeddings + cosine similarity -> top matches + confidence
 ```
 
-Open your browser to [http://localhost:8501/](http://localhost:8501/) if it doesn't open automatically.
+## Why semantic search
 
-### Local Development
+A keyword search for "dry skin" misses a product described as "moisturizer for parched skin". Embeddings turn both the query and the items into vectors that capture meaning, so the two end up close together even when they share no words.
 
-The `Makefile` and development requirements provide some handy Python tools for writing better code.
-See the `Makefile` for more detail
+## Why the user picks the dataset
 
-```sh
-# Run black, isort, and flake8 on your codebase
-make lint
-# Run pytest with coverage report on all tests not marked with `@pytest.mark.e2e`
-make test
-# Run pytest on tests marked e2e (NOTE: e2e tests require `make run` to be running in a separate terminal)
-make test-e2e
-# Run pytest on tests marked e2e and replace visual baseline images
-make test-e2e-baseline
-# After running tests, display the coverage html report on localhost
-make coverage
+An earlier version searched all datasets at once. A Yelp business called "Skin Care Studio" kept outranking real skin care products. Letting the user choose the dataset removes that mixing completely and also makes the sample preview possible.
+
+## Datasets
+
+| Dataset | Source | Items used |
+|---|---|---|
+| Amazon Beauty | Amazon Reviews 2023 (metadata) | 3,000 |
+| Amazon Video Games | Amazon Reviews 2023 (metadata) | 3,000 |
+| Yelp | Yelp Open Dataset (business.json) | 3,000 |
+
+Each dataset is converted to the same table (`item_id, title, description, image_url, rating`), so the app code does not care where the data came from.
+
+## Project structure
+
 ```
-## Deploy
+LLM_Recsys/
+├── streamlit_app.py        # the app: sidebar, sample cards, chat loop
+├── build_items.py          # one-time script that builds the item tables
+├── recsys_chat/
+│   ├── config.py           # paths, model names, thresholds, suggested prompts
+│   ├── data.py             # loads and validates the item tables
+│   ├── search.py           # embeddings, cosine similarity, confidence levels
+│   ├── llm.py              # Claude call that builds the search phrase
+│   └── ui.py               # item cards and confidence badge
+├── data/
+│   ├── raw/                # original downloads (not in git)
+│   └── processed/          # items_<dataset>.csv, embeddings_<dataset>.pt
+├── tests/
+│   └── test_logic.py       # unit tests for the confidence logic
+├── requirements.txt
+└── .streamlit/             # config.toml (secrets.toml stays local)
+```
 
-For the easiest experience, deploy to [Streamlit Cloud](https://streamlit.io/cloud)
+## Run locally
 
-For other options, see [Streamilt deployment wiki](https://discuss.streamlit.io/t/streamlit-deployment-guide-wiki/5099)
+```bash
+pip install -r requirements.txt
+```
 
-## Credits
+Create `.streamlit/secrets.toml`:
 
-This package was created with Cookiecutter and the `gerardrbentley/cookiecutter-streamlit` project template.
+```toml
+ANTHROPIC_API_KEY = "your-key-here"
+```
 
-- Cookiecutter: [https://github.com/audreyr/cookiecutter](https://github.com/audreyr/cookiecutter)
-- `gerardrbentley/cookiecutter-streamlit`: [https://github.com/gerardrbentley/cookiecutter-streamlit](https://github.com/gerardrbentley/cookiecutter-streamlit)
+Then start the app:
+
+```bash
+python -m streamlit run streamlit_app.py
+```
+
+The first run downloads the embedding model and computes embeddings for the chosen dataset. They are saved to `data/processed/`, so later runs start quickly.
+
+## Rebuild the item tables
+
+Only needed if you want different data. Put the raw files under `data/raw/` and run:
+
+```bash
+python build_items.py
+```
+
+If you change the items, delete the matching `embeddings_*.pt` file so the embeddings are computed again.
+
+## Tests
+
+```bash
+python -m pytest tests/test_logic.py -v
+```
+
+## Known limitations
+
+- The confidence thresholds (0.55 and 0.35) were picked by trying values and checking results by eye. They have not been tuned against human judgments.
+- Each dataset is a random sample of 3,000 items, not the full catalog.
+- The Yelp table contains every kind of business, not only restaurants, and Yelp has no product photos in the source files.
+- Search runs on the item title only. Adding the description to the embedding text would likely help.
+- Some image links come from the original datasets and can stop working over time.
