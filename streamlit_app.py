@@ -5,10 +5,9 @@ items by describing what you want in your own words.
 
 import streamlit as st
 
+from recsys_chat.agent import run_agent
 from recsys_chat.config import DATASETS, SAMPLE_SIZE, SUGGESTED_PROMPTS
 from recsys_chat.data import load_items
-from recsys_chat.llm import extract_search_phrase
-from recsys_chat.search import search
 from recsys_chat.ui import confidence_badge, render_cards
 
 st.set_page_config(page_title="Smart Recommendation Assistant", page_icon="🛍️")
@@ -59,7 +58,9 @@ st.divider()
 # --- 3. The conversation --------------------------------------------------
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        st.markdown(message["content"], unsafe_allow_html=True)
+        if message.get("badge"):
+            st.markdown(message["badge"], unsafe_allow_html=True)
+        st.markdown(message["content"])
         if message.get("results") is not None:
             render_cards(message["results"])
 
@@ -78,23 +79,19 @@ if user_input:
         st.markdown(user_input)
 
     with st.chat_message("assistant"):
-        with st.spinner("Searching..."):
-            phrase = extract_search_phrase(
-                st.session_state.messages, DATASETS[dataset]
+        with st.spinner("Thinking..."):
+            text, results, level = run_agent(
+                st.session_state.messages, items, dataset, DATASETS[dataset]
             )
-            results, level = search(phrase, items, dataset)
 
-        if level == "none":
-            text = f'No close match for "{phrase}". Try describing it differently.'
-            results = None
-        else:
-            badge = confidence_badge(level, results["score"].iloc[0])
-            text = f'{badge}\n\nInterpreted request: "{phrase}"'
-
-        st.markdown(text, unsafe_allow_html=True)
+        badge = None
+        if results is not None:
+            badge = confidence_badge(level, results["score"].max())
+            st.markdown(badge, unsafe_allow_html=True)
+        st.markdown(text)
         if results is not None:
             render_cards(results)
 
     st.session_state.messages.append(
-        {"role": "assistant", "content": text, "results": results}
+        {"role": "assistant", "content": text, "results": results, "badge": badge}
     )
