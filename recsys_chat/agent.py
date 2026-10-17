@@ -5,7 +5,7 @@ import json
 import anthropic
 import pandas as pd
 
-from recsys_chat.config import CLAUDE_MODEL
+from recsys_chat.config import CLAUDE_MODEL, DATASET_RULES
 from recsys_chat.llm import _api_key
 from recsys_chat.search import confidence_level, search
 
@@ -22,7 +22,8 @@ Rules for answer_user:
   empty item_ids list and say so plainly in the message.
 - Write the message in the same language as the user. Keep it short: name the
   best matches and say in one line why each fits. The app shows the item cards
-  separately, so do not repeat full descriptions."""
+  separately, so do not repeat full descriptions.
+{dataset_rules}"""
 
 SEARCH_TOOL = {
     "name": "search_catalog",
@@ -99,12 +100,15 @@ def run_agent(conversation: list[dict], items: pd.DataFrame, dataset: str, datas
     client = anthropic.Anthropic(api_key=_api_key())
     messages = [{"role": m["role"], "content": m["content"]} for m in conversation]
     seen = {}  # item_id -> row, everything the searches have returned so far
+    system_prompt = SYSTEM_PROMPT.format(
+        dataset_label=dataset_label, dataset_rules=DATASET_RULES.get(dataset, "")
+    )
 
     for _ in range(MAX_STEPS):
         response = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=700,
-            system=SYSTEM_PROMPT.format(dataset_label=dataset_label),
+            system=system_prompt,
             tools=[SEARCH_TOOL, ANSWER_TOOL],
             tool_choice={"type": "any"},  # every turn must end in a tool call
             messages=messages,

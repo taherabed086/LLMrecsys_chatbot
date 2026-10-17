@@ -7,16 +7,21 @@ from sentence_transformers import SentenceTransformer, util
 
 from recsys_chat.config import (
     CONFIDENCE_THRESHOLDS,
-    EMBEDDING_MODEL_NAME,
+    DEFAULT_EMBEDDING_MODEL,
+    EMBEDDING_MODELS,
     PROCESSED_DIR,
     TOP_K_MATCHES,
 )
 
 
+def embedding_model_name(dataset: str) -> str:
+    return EMBEDDING_MODELS.get(dataset, DEFAULT_EMBEDDING_MODEL)
+
+
 @st.cache_resource
-def load_embedding_model() -> SentenceTransformer:
+def load_embedding_model(model_name: str) -> SentenceTransformer:
     """Small local model; no API cost per query."""
-    return SentenceTransformer(EMBEDDING_MODEL_NAME)
+    return SentenceTransformer(model_name)
 
 
 @st.cache_resource
@@ -26,7 +31,8 @@ def get_embeddings(dataset: str, titles: tuple) -> torch.Tensor:
     if path.exists():
         return torch.load(path)
 
-    vectors = load_embedding_model().encode(
+    model = load_embedding_model(embedding_model_name(dataset))
+    vectors = model.encode(
         list(titles), convert_to_tensor=True, batch_size=32, show_progress_bar=True
     )
     torch.save(vectors, path)
@@ -46,7 +52,8 @@ def confidence_level(score: float) -> str:
 def search(query: str, items: pd.DataFrame, dataset: str) -> tuple[pd.DataFrame, str]:
     """Returns the closest items (with a 'score' column) and a confidence level."""
     vectors = get_embeddings(dataset, tuple(items["title"]))
-    query_vector = load_embedding_model().encode(query, convert_to_tensor=True)
+    model = load_embedding_model(embedding_model_name(dataset))
+    query_vector = model.encode(query, convert_to_tensor=True)
 
     scores = util.cos_sim(query_vector, vectors)[0]
     top = scores.topk(min(TOP_K_MATCHES, len(scores)))

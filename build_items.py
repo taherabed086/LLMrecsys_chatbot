@@ -8,6 +8,8 @@ The app never imports this file. It only prepares the small tables the
 app reads, so it lives next to the app instead of inside it.
 """
 
+import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -68,6 +70,33 @@ def yelp_items(path: Path) -> pd.DataFrame:
     })
 
 
+def strip_html(text):
+    """Removes HTML tags, in case a description ever has them."""
+    if not isinstance(text, str):
+        return text
+    return re.sub(r"<[^>]+>", " ", text).strip()
+
+
+def alnahal_items(path: Path) -> pd.DataFrame:
+    """Turns the Mahally JSON-LD dump (one product per line) into the items table."""
+    rows = [json.loads(line) for line in path.open(encoding="utf-8") if line.strip()]
+    products = [r["product"] for r in rows]
+
+    title = pd.Series([p.get("name") for p in products])
+    description = pd.Series([strip_html(p.get("description")) for p in products])
+
+    return pd.DataFrame({
+        "item_id": [r["item_id"] for r in rows],
+        "title": title,
+        # Fall back to the title when there is no description
+        "description": description.where(description.str.len() > 0, title),
+        "image_url": [(p.get("image") or [None])[0] for p in products],
+        "rating": [(p.get("aggregateRating") or {}).get("ratingValue") for p in products],
+        "price": [(p.get("offers") or [{}])[0].get("price") for p in products],
+        "category": [p.get("category") for p in products],
+    })
+
+
 def save(df: pd.DataFrame, name: str) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     df = df.dropna(subset=["title"])
@@ -80,3 +109,4 @@ if __name__ == "__main__":
     save(amazon_items(RAW / "amazon_beauty" / "meta.jsonl.gz"), "beauty")
     save(amazon_items(RAW / "amazon_video_games" / "meta.jsonl.gz"), "video_games")
     save(yelp_items(RAW / "yelp" / "business.json"), "yelp")
+    save(alnahal_items(RAW / "alnahal" / "products.jsonl"), "alnahal")
